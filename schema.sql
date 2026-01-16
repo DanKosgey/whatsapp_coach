@@ -1,5 +1,5 @@
 -- Users table
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
     user_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     whatsapp_number VARCHAR(20) UNIQUE NOT NULL,
     name VARCHAR(100),
@@ -17,7 +17,7 @@ CREATE TABLE users (
 );
 
 -- Daily logs from WhatsApp conversations
-CREATE TABLE daily_logs (
+CREATE TABLE IF NOT EXISTS daily_logs (
     log_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
     log_date DATE NOT NULL,
@@ -49,7 +49,7 @@ CREATE TABLE daily_logs (
 );
 
 -- Conversation history with AI agent
-CREATE TABLE conversations (
+CREATE TABLE IF NOT EXISTS conversations (
     conversation_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
     message_timestamp TIMESTAMP DEFAULT NOW(),
@@ -62,7 +62,7 @@ CREATE TABLE conversations (
 );
 
 -- Events (relapses, wins, etc.)
-CREATE TABLE events (
+CREATE TABLE IF NOT EXISTS events (
     event_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
     event_type VARCHAR(20) CHECK (event_type IN ('relapse', 'sexual_activity', 'wet_dream', 'major_win')),
@@ -76,7 +76,7 @@ CREATE TABLE events (
 );
 
 -- Goals tracking
-CREATE TABLE goals (
+CREATE TABLE IF NOT EXISTS goals (
     goal_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
     title VARCHAR(200) NOT NULL,
@@ -93,7 +93,7 @@ CREATE TABLE goals (
 );
 
 -- Energy transactions
-CREATE TABLE energy_transactions (
+CREATE TABLE IF NOT EXISTS energy_transactions (
     transaction_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
     transaction_date TIMESTAMP DEFAULT NOW(),
@@ -105,7 +105,7 @@ CREATE TABLE energy_transactions (
 );
 
 -- Scheduled message queue
-CREATE TABLE message_queue (
+CREATE TABLE IF NOT EXISTS message_queue (
     queue_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
     scheduled_time TIMESTAMP NOT NULL,
@@ -117,7 +117,7 @@ CREATE TABLE message_queue (
 );
 
 -- User analytics/insights cache
-CREATE TABLE user_insights (
+CREATE TABLE IF NOT EXISTS user_insights (
     insight_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
     insight_date DATE DEFAULT CURRENT_DATE,
@@ -127,8 +127,8 @@ CREATE TABLE user_insights (
 );
 
 -- Indexes for performance
-CREATE INDEX idx_daily_logs_user_date ON daily_logs(user_id, log_date DESC);
-CREATE INDEX idx_conversations_user_time ON conversations(user_id, message_timestamp DESC);
-CREATE INDEX idx_events_user_type ON events(user_id, event_type, event_timestamp DESC);
-CREATE INDEX idx_message_queue_scheduled ON message_queue(scheduled_time) WHERE sent = FALSE;
-CREATE INDEX idx_goals_user_active ON goals(user_id) WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_daily_logs_user_date ON daily_logs(user_id, log_date DESC);
+CREATE INDEX IF NOT EXISTS idx_conversations_user_time ON conversations(user_id, message_timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_events_user_type ON events(user_id, event_type, event_timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_message_queue_scheduled ON message_queue(scheduled_time) WHERE sent = FALSE;
+CREATE INDEX IF NOT EXISTS idx_goals_user_active ON goals(user_id) WHERE status = 'active';

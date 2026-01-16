@@ -1,48 +1,70 @@
 const cron = require('node-cron');
 const db = require('./db');
 const whatsapp = require('./whatsapp-meta');
+const telegramBot = require('./telegram-bot');
 const aiAgent = require('./ai-agent');
 require('dotenv').config();
 
-// Schedule check-ins every 4 hours (example: 9 AM, 1 PM, 5 PM, 9 PM)
+async function sendMessage(user, text) {
+    // Default to 'whatsapp' if not set, or if set to 'whatsapp'
+    // If set to 'telegram', try telegram.
+    const channel = user.preferred_channel || 'whatsapp';
+
+    if (channel === 'telegram' && user.telegram_id) {
+        try {
+            await telegramBot.telegram.sendMessage(user.telegram_id, text);
+            console.log(`✅ Sent Telegram msg to ${user.name}`);
+        } catch (e) {
+            console.error(`❌ Failed Telegram msg to ${user.name}`, e);
+        }
+    } else if (user.whatsapp_number) {
+        // Fallback or explicit whatsapp
+        try {
+            await whatsapp.sendTextMessage(user.whatsapp_number, text);
+            console.log(`✅ Sent WhatsApp msg to ${user.name}`);
+        } catch (e) {
+            console.error(`❌ Failed WhatsApp msg to ${user.name}`, e);
+        }
+    } else {
+        console.log(`⚠️ User ${user.name} has no contact info for ${channel}`);
+    }
+}
+
 function startScheduler() {
-    // Run every hour and check if any users need check-ins
-    // Cron format: Minute Hour Day Month Weekday
+    // Check-ins
     cron.schedule('0 * * * *', async () => {
         console.log('⏰ Running scheduled check-in task...');
         await sendScheduledCheckIns();
     });
 
-    // Daily goal reminders at 8 AM
+    // Goals
     cron.schedule('0 8 * * *', async () => {
         console.log('🎯 Running daily goal reminder task...');
         await sendGoalReminders();
     });
 
-    // Daily energy credits at midnight
+    // Daily energy
     cron.schedule('0 0 * * *', async () => {
         console.log('⚡ Running daily energy credit task...');
         await distributeDailyEnergy();
     });
 
-    // Weekly summary every Sunday at 7 PM
+    // Weekly summary
     cron.schedule('0 19 * * 0', async () => {
         console.log('📊 Running weekly summary task...');
         await sendWeeklySummaries();
     });
 
-    console.log('✅ Scheduler started successfully (Cron Mode)');
+    console.log('✅ Scheduler started (Cron Mode)');
 }
 
-// Send check-ins based on user preferences
 async function sendScheduledCheckIns() {
     try {
         const currentHour = new Date().getHours();
         const currentTime = `${currentHour.toString().padStart(2, '0')}:00`;
 
-        // Get users who have this time in their check-in preferences
         const users = await db.query(
-            `SELECT user_id, whatsapp_number, name, preferences, current_streak, current_energy
+            `SELECT user_id, whatsapp_number, telegram_id, name, preferences, current_streak, current_energy, preferred_channel
              FROM users 
              WHERE preferences->'check_in_times' ? $1
              AND (preferences->>'reminder_enabled')::boolean = true`,
@@ -50,7 +72,6 @@ async function sendScheduledCheckIns() {
         );
 
         for (const user of users) {
-            // Check if user already checked in during this hour
             const existingLog = await db.query(
                 `SELECT * FROM daily_logs 
                  WHERE user_id = $1 
@@ -61,16 +82,13 @@ async function sendScheduledCheckIns() {
 
             if (existingLog.length > 0) continue;
 
-            // Generate personalized check-in message
             const checkInMessage = await aiAgent.generateAIResponse(
                 user.user_id,
                 'scheduled_check_in',
                 'check_in'
             );
 
-            // Send via WhatsApp
-            await whatsapp.sendTextMessage(user.whatsapp_number, checkInMessage);
-            console.log(`✅ Check-in sent to ${user.name}`);
+            await sendMessage(user, checkInMessage);
         }
     } catch (error) {
         console.error('Error in scheduled check-ins:', error);
@@ -80,7 +98,7 @@ async function sendScheduledCheckIns() {
 async function sendGoalReminders() {
     try {
         const users = await db.query(
-            `SELECT DISTINCT u.user_id, u.whatsapp_number, u.name 
+            `SELECT DISTINCT u.user_id, u.whatsapp_number, u.telegram_id, u.name, u.preferred_channel
              FROM users u
              INNER JOIN goals g ON u.user_id = g.user_id
              WHERE g.status = 'active'
@@ -92,12 +110,11 @@ async function sendGoalReminders() {
             if (goals.length === 0) continue;
 
             const reminderMessage = await aiAgent.generateAIResponse(user.user_id, 'goal_reminder_request', 'goal_reminder');
-            await whatsapp.sendTextMessage(user.whatsapp_number, reminderMessage);
+            await sendMessage(user, reminderMessage);
 
             for (const goal of goals) {
                 await db.query('UPDATE goals SET last_reminded_at = NOW() WHERE goal_id = $1', [goal.goal_id]);
             }
-            console.log(`✅ Goal reminder sent to ${user.name}`);
         }
     } catch (error) {
         console.error('Error sending goal reminders:', error);
@@ -120,11 +137,10 @@ async function distributeDailyEnergy() {
 
 async function sendWeeklySummaries() {
     try {
-        const users = await db.query('SELECT user_id, whatsapp_number, name FROM users');
+        const users = await db.query('SELECT user_id, whatsapp_number, telegram_id, name, preferred_channel FROM users');
         for (const user of users) {
             const summary = `📊 Weekly Summary for ${user.name}\nCheck app for details!`;
-            // In real version, we re-calculate stats here, keeping it simple for brevity in revert
-            await whatsapp.sendTextMessage(user.whatsapp_number, summary);
+            await sendMessage(user, summary);
         }
     } catch (error) {
         console.error('Error sending weekly summaries:', error);

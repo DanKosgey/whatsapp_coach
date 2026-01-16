@@ -6,8 +6,16 @@ require('dotenv').config();
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 // Agent personality and system prompt
-const SYSTEM_PROMPT = `You are a supportive, non-judgmental AI coach helping users track their celibacy journey and personal growth. Your role is to:
+// Agent personas
+const PERSONAS = {
+    default: "You are a supportive, non-judgmental AI coach.",
+    stoic: "You are a Stoic mentor. Focus on discipline, rationality, and control. Use quotes from Marcus Aurelius or Seneca. Be firm but calm.",
+    drill: "You are a Drill Sergeant. Be tough, demanding, and high-energy. No excuses. Focus on strength and willpower. Use caps for emphasis.",
+    friend: "You are an empathetic best friend. Be warm, caring, and gentle. Focus on feelings and emotional support.",
+    analyst: "You are a Data Analyst. Focus on the numbers, streaks, and logical patterns. Be objective and precise."
+};
 
+const BASE_PROMPT = `Your role is to:
 1. Ask questions to gather daily check-in data (energy, mood, urges, activities)
 2. Provide encouragement and motivation
 3. Remind users of their goals
@@ -15,17 +23,12 @@ const SYSTEM_PROMPT = `You are a supportive, non-judgmental AI coach helping use
 5. Support them during difficult moments
 
 Key principles:
-- Be concise (WhatsApp messages should be short - max 2-3 sentences)
-- Use emojis sparingly but effectively (1-2 per message max)
-- Never judge relapses - be supportive and constructive
+- Be concise (WhatsApp/Telegram messages should be short - max 2-3 sentences)
+- Use emojis sparingly but effectively
 - Ask ONE question at a time
-- Celebrate wins enthusiastically but briefly
-- Use the user's name when you know it
-- Keep responses under 100 words
-- Be warm, encouraging, and direct
+- Keep responses under 100 words`;
 
-Current context will be provided about the user's streak, energy, and recent activity.`;
-
+// Detect if message indicates relapse
 // Detect if message indicates relapse
 async function detectRelapseIntent(messageText) {
     const relapseKeywords = [
@@ -41,7 +44,7 @@ async function detectRelapseIntent(messageText) {
 
     // AI check for nuance
     try {
-        const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+        const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
         const prompt = `Analyze this message. Is the user reporting a relapse/failure in their celibacy streak? Reply YES or NO. Message: "${messageText}"`;
         const result = await model.generateContent(prompt);
         const response = result.response.text().trim().toUpperCase();
@@ -64,7 +67,7 @@ async function detectWinIntent(messageText) {
     if (winKeywords.some(kw => lowerText.includes(kw))) return true;
 
     try {
-        const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+        const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
         const prompt = `Analyze this message. Is the user reporting a significant success or goal completion? Reply YES or NO. Message: "${messageText}"`;
         const result = await model.generateContent(prompt);
         const response = result.response.text().trim().toUpperCase();
@@ -111,34 +114,41 @@ async function generateAIResponse(userId, userMessage, messageType = 'casual') {
             conversationHistory += `${conv.sender === 'user' ? 'User' : 'Assistant'}: ${conv.message_text}\n`;
         });
 
-        // Create context-aware prompt
+        // Determine Persona
+        const personaKey = userData.preferences?.coach_persona || 'default';
+        const personaPrompt = PERSONAS[personaKey] || PERSONAS.default;
+
+        // Determine Risk Level (Simple heuristic based on time of day)
+        const hour = new Date().getHours();
+        let riskLevel = 'LOW';
+        if (hour >= 22 || hour <= 2) riskLevel = 'HIGH'; // Late night
+        if (userData.current_streak < 3) riskLevel = 'MEDIUM'; // Early streak
+
         const contextPrompt = `
 USER CONTEXT:
 - Name: ${context.name}
-- Current streak: ${context.streak} days
-- Current energy: ${context.energy} points
-- Active goals: ${context.goals.length > 0 ? context.goals.map(g => g.title).join(', ') : 'None set'}
-- Today's check-in: ${context.today_energy ? `Energy ${context.today_energy}/10, Mood ${context.today_mood}/10` : 'Not yet completed'}
+- Streak: ${context.streak} days
+- Energy: ${context.energy}
+- RISK LEVEL: ${riskLevel} (Time: ${hour}:00)
+- Persona Mode: ${personaKey.toUpperCase()}
 
 MESSAGE TYPE: ${messageType}
-
-${messageType === 'check_in' ? 'This is a scheduled check-in. Ask about their current state (energy, mood). Be brief and friendly.' : ''}
-${messageType === 'goal_reminder' ? 'Remind them of their goals and ask about progress. Be motivating but concise.' : ''}
-${messageType === 'emergency' ? 'User may be struggling. Provide immediate support and ONE simple coping strategy (e.g., deep breathing, phone down).' : ''}
-${messageType === 'celebration' ? 'User achieved something! Celebrate briefly and ask what helped them succeed.' : ''}
 
 RECENT CONVERSATION:
 ${conversationHistory}
 
-USER'S CURRENT MESSAGE: ${userMessage}
+USER'S MESSAGE: ${userMessage}
 
-Respond naturally and helpfully as the Celibacy Coach. Keep it under 100 words and 2-3 sentences maximum.`;
-
-        // Initialize Gemini model (using gemini-pro for text)
-        const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+INSTRUCTIONS:
+Respond as the ${personaKey} persona.
+${riskLevel === 'HIGH' ? 'WARNING: User is in a high-risk window (late night). Be extra vigilant.' : ''}
+Keep it short.`;
 
         // Create full prompt
-        const fullPrompt = `${SYSTEM_PROMPT}\n\n${contextPrompt}`;
+        const fullPrompt = `${personaPrompt}\n${BASE_PROMPT}\n\n${contextPrompt}`;
+
+        // Initialize model
+        const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
 
         // Generate response
         const result = await model.generateContent(fullPrompt);
@@ -148,7 +158,7 @@ Respond naturally and helpfully as the Celibacy Coach. Keep it under 100 words a
         // Save AI response to conversation history
         await db.saveConversation(userId, 'agent', aiResponse, messageType, {
             context_used: context,
-            model: 'gemini-pro'
+            model: 'gemini-flash-latest'
         });
 
         return aiResponse.trim();
